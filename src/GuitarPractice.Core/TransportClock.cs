@@ -63,6 +63,32 @@ public sealed class TransportClock
         PositionFrame = Math.Clamp(TimeToFrames(position), 0, DurationFrames);
     }
 
+    public void Retime(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(duration));
+        }
+
+        var previousDuration = DurationFrames;
+        var position = PositionFrame;
+        var loopStart = LoopStartFrame;
+        var loopEnd = LoopEndFrame;
+        SetDuration(duration);
+        var factor = (double)DurationFrames / previousDuration;
+        PositionFrame = Math.Clamp((long)Math.Round(position * factor), 0, DurationFrames);
+        LoopStartFrame = Math.Clamp((long)Math.Round(loopStart * factor), 0, DurationFrames);
+        LoopEndFrame = Math.Clamp((long)Math.Round(loopEnd * factor), 0, DurationFrames);
+
+        if (!HasValidLoop)
+        {
+            var minimumLength = Math.Min(DurationFrames, SecondsToFrames(MinimumLoopSeconds));
+            LoopStartFrame = Math.Min(LoopStartFrame, DurationFrames - minimumLength);
+            LoopEndFrame = Math.Max(LoopEndFrame, LoopStartFrame + minimumLength);
+        }
+        IsLoopEnabled &= HasValidLoop;
+    }
+
     public void SetLoopStart(TimeSpan position)
     {
         var requestedFrame = Math.Clamp(TimeToFrames(position), 0, DurationFrames);

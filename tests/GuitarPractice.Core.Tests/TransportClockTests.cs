@@ -72,4 +72,35 @@ public sealed class TransportClockTests
         Assert.Equal(TimeSpan.FromSeconds(2), clock.LoopStart);
         Assert.Equal(TimeSpan.FromSeconds(6), clock.LoopEnd);
     }
+
+    [Fact]
+    public void RetimingPreservesMusicalPositionAndLoop()
+    {
+        var clock = new TransportClock(48000, TimeSpan.FromSeconds(20));
+        clock.SetLoopRange(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(6));
+        clock.SetLoopEnabled(true);
+        clock.Seek(TimeSpan.FromSeconds(4));
+
+        clock.Retime(TimeSpan.FromSeconds(40));
+
+        Assert.Equal(TimeSpan.FromSeconds(8), clock.Position);
+        Assert.Equal(TimeSpan.FromSeconds(4), clock.LoopStart);
+        Assert.Equal(TimeSpan.FromSeconds(12), clock.LoopEnd);
+        Assert.True(clock.IsLoopEnabled);
+    }
+
+    [Fact]
+    public void FasterTempoKeepsTinyLoopsAtLeastFiftyMillisecondsLong()
+    {
+        var clock = new TransportClock(48000, TimeSpan.FromSeconds(20));
+        clock.SetLoopRange(TimeSpan.FromSeconds(19.9), TimeSpan.FromSeconds(20));
+        clock.SetLoopEnabled(true);
+
+        clock.Retime(TimeSpan.FromSeconds(5));
+
+        Assert.True(clock.HasValidLoop);
+        Assert.True(clock.IsLoopEnabled);
+        Assert.Equal(TimeSpan.FromSeconds(5), clock.LoopEnd);
+        Assert.Equal(TimeSpan.FromMilliseconds(50), clock.LoopEnd - clock.LoopStart);
+    }
 }

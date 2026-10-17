@@ -16,6 +16,9 @@ public sealed class PracticeAudioEngine : ISampleProvider, IDisposable
     private readonly TransportClock _clock = new(OutputSampleRate, EmptySessionDuration);
     private readonly IWavePlayer _output;
     private float[] _trackBuffer = [];
+    private ExercisePlayback? _exercisePlayback;
+    private bool _exerciseSoundEnabled = true;
+    private float _exerciseVolume = 0.55f;
     private bool _isPlaying;
     private bool _endEventRaised;
     private bool _metronomeEnabled;
@@ -23,10 +26,10 @@ public sealed class PracticeAudioEngine : ISampleProvider, IDisposable
     private float _masterVolume = 0.9f;
     private double _beatsPerMinute = 120;
 
-    public PracticeAudioEngine()
+    public PracticeAudioEngine(IWavePlayer? output = null)
     {
         WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(OutputSampleRate, 2);
-        _output = new WasapiOut(AudioClientShareMode.Shared, true, 60);
+        _output = output ?? new WasapiOut(AudioClientShareMode.Shared, true, 60);
         _output.Init(new SampleToWaveProvider(this));
         _output.PlaybackStopped += Output_PlaybackStopped;
     }
@@ -116,15 +119,74 @@ public sealed class PracticeAudioEngine : ISampleProvider, IDisposable
         }
         set
         {
-            if (value is < 20 or > 400)
+            if (!double.IsFinite(value) || value is < 20 or > 400)
             {
                 throw new ArgumentOutOfRangeException(nameof(value), "BPM must be between 20 and 400.");
             }
 
             lock (_gate)
             {
+                if (_exercisePlayback is not null)
+                {
+                    _clock.Retime(_exercisePlayback.Exercise.GetDuration(value));
+                }
                 _beatsPerMinute = value;
             }
+        }
+    }
+
+    public bool ExerciseSoundEnabled
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _exerciseSoundEnabled;
+            }
+        }
+        set
+        {
+            lock (_gate)
+            {
+                _exerciseSoundEnabled = value;
+            }
+        }
+    }
+
+    public float ExerciseVolume
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _exerciseVolume;
+            }
+        }
+        set
+        {
+            if (!float.IsFinite(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+            lock (_gate)
+            {
+                _exerciseVolume = Math.Clamp(value, 0, 1);
+            }
+        }
+    }
+
+    public void SetExercise(PracticeExercise? exercise)
+    {
+        var playback = exercise is null ? null : new ExercisePlayback(exercise, OutputSampleRate);
+        Pause();
+        lock (_gate)
+        {
+            _exercisePlayback = playback;
+            RecalculateDuration();
+            _clock.SetLoopRange(TimeSpan.Zero, _clock.Duration);
+            _clock.SetLoopEnabled(false);
+            SeekInternal(TimeSpan.Zero);
+            _endEventRaised = false;
         }
     }
 
@@ -330,7 +392,19 @@ public sealed class PracticeAudioEngine : ISampleProvider, IDisposable
 
                 var segmentSamples = segmentFrames * WaveFormat.Channels;
                 var destinationOffset = offset + framesWritten * WaveFormat.Channels;
-                MixTracks(buffer, destinationOffset, segmentSamples, _clock.PositionFrame);
+                if (_exercisePlayback is not null)
+                {
+                    if (_exerciseSoundEnabled)
+                    {
+                        _exercisePlayback.Mix(
+                            buffer, destinationOffset, segmentFrames, _clock.PositionFrame,
+                            _beatsPerMinute, _exerciseVolume);
+                    }
+                }
+                else
+                {
+                    MixTracks(buffer, destinationOffset, segmentSamples, _clock.PositionFrame);
+                }
                 ApplyLoopEdgeFade(buffer, destinationOffset, segmentFrames, _clock.PositionFrame);
                 MixMetronome(buffer, destinationOffset, segmentFrames, _clock.PositionFrame);
                 ApplyMasterVolume(buffer, destinationOffset, segmentSamples);
@@ -479,9 +553,11 @@ public sealed class PracticeAudioEngine : ISampleProvider, IDisposable
 
     private void RecalculateDuration()
     {
-        var duration = _tracks.Count == 0
-            ? EmptySessionDuration
-            : _tracks.Max(track => track.Model.End);
+        var duration = _exercisePlayback is not null
+            ? _exercisePlayback.Exercise.GetDuration(_beatsPerMinute)
+            : _tracks.Count == 0
+                ? EmptySessionDuration
+                : _tracks.Max(track => track.Model.End);
         _clock.SetDuration(duration);
         SeekTracksToClock();
     }
@@ -494,6 +570,11 @@ public sealed class PracticeAudioEngine : ISampleProvider, IDisposable
 
     private void SeekTracksToClock()
     {
+        if (_exercisePlayback is not null)
+        {
+            return;
+        }
+
         foreach (var track in _tracks)
         {
             track.Seek(_clock.PositionFrame);

@@ -136,10 +136,16 @@
                 <TextBlock Margin="0,3,0,0"
                            Foreground="{StaticResource MutedTextBrush}"
                            FontSize="12"
-                           Text="多轨练习 · 区间循环 · 节拍器 · 吉他录音" />
+                           Text="预设跟谱 · 多轨练习 · 区间循环 · 吉他录音" />
             </StackPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <ToggleButton x:Name="ExerciseModeToggle"
+                              Margin="0,0,12,0"
+                              IsEnabled="False"
+                              Content="预设练习"
+                              Checked="ExerciseModeToggle_Changed"
+                              Unchecked="ExerciseModeToggle_Changed" />
                 <TextBlock Margin="0,0,14,0"
                            VerticalAlignment="Center"
                            Foreground="{StaticResource MutedTextBrush}"
@@ -227,7 +233,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="2" Margin="0,0,0,12">
+        <Grid x:Name="AudioWorkspace" Grid.Row="2" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="350" />
                 <ColumnDefinition Width="12" />
@@ -352,6 +358,102 @@
             </Border>
         </Grid>
 
+        <Grid x:Name="ExerciseWorkspace" Grid.Row="2" Margin="0,0,0,12" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Style="{StaticResource CardStyle}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel>
+                        <TextBlock FontSize="15" FontWeight="SemiBold" Text="内置练习" />
+                        <ComboBox x:Name="ExercisePresetCombo"
+                                  Margin="0,12,0,10"
+                                  DisplayMemberPath="Name"
+                                  SelectionChanged="ExercisePresetCombo_SelectionChanged" />
+                        <TextBlock x:Name="ExerciseDescription"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Margin="0,16,0,4" Text="练习速度（基准 120 BPM）" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="64" />
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="ExerciseSpeedSlider"
+                                    Minimum="0.3333333333333333"
+                                    Maximum="2"
+                                    Value="0.6666666666666666"
+                                    ValueChanged="ExerciseSpeedSlider_ValueChanged" />
+                            <TextBlock x:Name="ExerciseSpeedLabel"
+                                       Grid.Column="1"
+                                       VerticalAlignment="Center"
+                                       HorizontalAlignment="Right"
+                                       FontFamily="Consolas"
+                                       Text="0.67×" />
+                        </Grid>
+                        <TextBlock Margin="0,3,0,12"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Text="与下方 BPM 双向联动；只改变练习时长，不改变音高。r 表示休止。" />
+                        <ToggleButton x:Name="ExerciseSoundToggle"
+                                      IsChecked="True"
+                                      Content="合成拨弦参考音"
+                                      Checked="ExerciseSoundToggle_Changed"
+                                      Unchecked="ExerciseSoundToggle_Changed" />
+                        <Slider x:Name="ExerciseVolumeSlider"
+                                Margin="0,10,0,14"
+                                Minimum="0"
+                                Maximum="1"
+                                Value="0.55"
+                                ToolTip="练习参考音音量"
+                                ValueChanged="ExerciseVolumeSlider_ValueChanged" />
+                        <Button Content="循环当前小节" Click="LoopExerciseMeasure_Click" />
+                        <TextBlock Margin="0,14,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Text="此模式暂停现有音轨，并暂不录音。关闭顶部“预设练习”会恢复原来的音轨、BPM 和循环区间。" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="0" ClipToBounds="True">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="12,9">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ExercisePositionLabel"
+                                   VerticalAlignment="Center"
+                                   FontSize="12"
+                                   Text="点击音符定位 · Shift + 拖动选择循环" />
+                        <ToggleButton x:Name="ExerciseFollowToggle"
+                                      Grid.Column="1"
+                                      IsChecked="True"
+                                      Padding="8,4"
+                                      Content="跟随播放"
+                                      Checked="ExerciseFollowToggle_Changed"
+                                      Unchecked="ExerciseFollowToggle_Changed" />
+                    </Grid>
+                    <ScrollViewer Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <controls:ExerciseTablature x:Name="Tablature" />
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="1.05*" />
@@ -373,7 +475,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock FontSize="15" FontWeight="SemiBold" Text="节拍器" />
+                        <TextBlock x:Name="MetronomeTitle" FontSize="15" FontWeight="SemiBold" Text="节拍器" />
                         <ToggleButton x:Name="MetronomeToggle"
                                       Grid.Column="1"
                                       Padding="10,5"

@@ -21,6 +21,29 @@ public sealed class PracticeSession
     public double LoopEndSeconds { get; init; }
 
     public string? RecordingInputId { get; init; }
+
+    public ExerciseSessionState? Exercise { get; init; }
+}
+
+public sealed class ExerciseSessionState
+{
+    public bool IsActive { get; init; }
+
+    public string PresetId { get; init; } = "c-diatonic-arpeggios";
+
+    public double BeatsPerMinute { get; init; } = 80;
+
+    public bool SoundEnabled { get; init; } = true;
+
+    public double Volume { get; init; } = 0.55;
+
+    public bool FollowPlayback { get; init; } = true;
+
+    public bool LoopEnabled { get; init; } = true;
+
+    public double LoopStartBeats { get; init; }
+
+    public double LoopEndBeats { get; init; }
 }
 
 public sealed class TrackSessionEntry

@@ -98,7 +98,7 @@ jobs:
                   'release', 'create', $tag, $env:RELEASE_ARCHIVE,
                   '--verify-tag', '--title', "Guitar Practice $tag", '--generate-notes'
               )
-              if ($env:APP_VERSION.Contains('-')) {
+              if ($env:APP_VERSION.Split('+')[0].Contains('-')) {
                   $arguments += '--prerelease'
               }
               gh @arguments

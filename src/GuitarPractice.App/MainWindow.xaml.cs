@@ -37,15 +37,42 @@ public partial class MainWindow : Window
     private int _loopRecordingFinishQueued;
     private Task? _finishRecordingTask;
     private TimeSpan _recordingStart;
+    private bool _isExerciseMode;
+    private double _exerciseBpm = 80;
+    private bool _exerciseLoopEnabled = true;
+    private double _exerciseLoopStartBeats;
+    private double _exerciseLoopEndBeats;
+    private AudioWorkspaceState? _audioWorkspaceState;
+    private int _pendingTrackLoads;
 
-    public MainWindow()
+    private sealed record AudioWorkspaceState(
+        TimeSpan Position,
+        TimeSpan LoopStart,
+        TimeSpan LoopEnd,
+        bool LoopEnabled,
+        double BeatsPerMinute);
+
+    private PracticeExercise SelectedExercise =>
+        ExercisePresetCombo.SelectedItem as PracticeExercise
+        ?? throw new InvalidOperationException("No practice exercise is selected.");
+
+    public MainWindow() : this(null)
+    {
+    }
+
+    internal MainWindow(PracticeAudioEngine? engine)
     {
         InitializeComponent();
+        _engine = engine;
 
         TrackItems.ItemsSource = _tracks;
         Timeline.Tracks = _tracks;
         Timeline.SeekRequested += Timeline_SeekRequested;
         Timeline.LoopSelectionRequested += Timeline_LoopSelectionRequested;
+        Tablature.SeekRequested += Timeline_SeekRequested;
+        Tablature.LoopSelectionRequested += Timeline_LoopSelectionRequested;
+        ExercisePresetCombo.ItemsSource = ExerciseLibrary.All;
+        ExercisePresetCombo.SelectedIndex = 0;
 
         _uiTimer = new DispatcherTimer(DispatcherPriority.Render)
         {
@@ -64,7 +91,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            _engine = new PracticeAudioEngine();
+            _engine ??= new PracticeAudioEngine();
             _engine.PlaybackEnded += Engine_PlaybackEnded;
             _engine.LoopCompleted += Engine_LoopCompleted;
             _engine.PlaybackFaulted += Engine_PlaybackFaulted;
@@ -102,11 +129,14 @@ public partial class MainWindow : Window
         }
 
         _sessionReady = true;
+        ExerciseModeToggle.IsEnabled = _pendingTrackLoads == 0;
         _uiTimer.Start();
         UpdateUi();
-        SetStatus(_tracks.Count == 0
-            ? "准备就绪。请导入音频，或只开启节拍器开始练习。"
-            : $"已恢复 {_tracks.Count} 条音轨。");
+        SetStatus(_isExerciseMode
+            ? $"已恢复预设练习：{SelectedExercise.Name}。"
+            : _tracks.Count == 0
+                ? "准备就绪。可打开预设练习、导入音频，或只开启节拍器。"
+                : $"已恢复 {_tracks.Count} 条音轨。");
     }
 
     private async void ImportTracks_Click(object sender, RoutedEventArgs eventArgs)
@@ -140,6 +170,7 @@ public partial class MainWindow : Window
             }
             else
             {
+                SeekIntoExerciseLoop();
                 if (RecordArmToggle.IsChecked == true &&
                     !_recorder.IsRecording &&
                     !StartRecording())
@@ -195,6 +226,7 @@ public partial class MainWindow : Window
         }
 
         _engine.SetLoopEnabled(LoopToggle.IsChecked == true);
+        SeekIntoExerciseLoop();
         ScheduleSessionSave();
         UpdateUi();
     }
@@ -224,7 +256,239 @@ public partial class MainWindow : Window
         }
 
         _engine.BeatsPerMinute = Math.Round(eventArgs.NewValue);
+        if (_isExerciseMode)
+        {
+            _exerciseBpm = _engine.BeatsPerMinute;
+            UpdateExerciseSpeedControls();
+            UpdateUi();
+        }
         ScheduleSessionSave();
+    }
+
+    private void ExerciseModeToggle_Changed(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_isUpdatingUi || _engine is null)
+        {
+            return;
+        }
+
+        try
+        {
+            SetExerciseMode(ExerciseModeToggle.IsChecked == true);
+        }
+        catch (Exception exception)
+        {
+            _isUpdatingUi = true;
+            ExerciseModeToggle.IsChecked = _isExerciseMode;
+            _isUpdatingUi = false;
+            ShowError("无法切换练习模式", exception);
+        }
+    }
+
+    private void SetExerciseMode(bool enabled)
+    {
+        if (_engine is null || enabled == _isExerciseMode)
+        {
+            return;
+        }
+        if (_recorder.IsRecording || _finishRecordingTask is { IsCompleted: false } || _pendingTrackLoads > 0)
+        {
+            _isUpdatingUi = true;
+            ExerciseModeToggle.IsChecked = _isExerciseMode;
+            _isUpdatingUi = false;
+            MessageBox.Show(this, _pendingTrackLoads > 0
+                    ? "请先等待音轨载入完成，再切换练习模式。"
+                    : "请先暂停播放并保存本次录音，再切换练习模式。",
+                "暂时无法切换", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (enabled)
+        {
+            var audioState = new AudioWorkspaceState(
+                _engine.Position, _engine.LoopStart, _engine.LoopEnd,
+                _engine.IsLoopEnabled, _engine.BeatsPerMinute);
+            _engine.SetExercise(SelectedExercise);
+            _audioWorkspaceState = audioState;
+            _engine.BeatsPerMinute = _exerciseBpm;
+            var start = TimeSpan.FromSeconds(_exerciseLoopStartBeats * 60 / _exerciseBpm);
+            var end = TimeSpan.FromSeconds(_exerciseLoopEndBeats * 60 / _exerciseBpm);
+            if (end - start >= TimeSpan.FromMilliseconds(50) &&
+                start >= TimeSpan.Zero && end <= _engine.Duration)
+            {
+                _engine.SetLoopRange(start, end);
+            }
+            _engine.SetLoopEnabled(_exerciseLoopEnabled);
+            if (_exerciseLoopEnabled)
+            {
+                _engine.Seek(_engine.LoopStart);
+            }
+        }
+        else
+        {
+            CaptureExerciseLoop();
+            var audioState = _audioWorkspaceState
+                ?? throw new InvalidOperationException("The audio workspace state is missing.");
+            _engine.SetExercise(null);
+            _engine.BeatsPerMinute = audioState.BeatsPerMinute;
+            _engine.SetLoopRange(audioState.LoopStart, audioState.LoopEnd);
+            _engine.SetLoopEnabled(audioState.LoopEnabled);
+            _engine.Seek(audioState.Position);
+            _audioWorkspaceState = null;
+        }
+
+        _isExerciseMode = enabled;
+        _isUpdatingUi = true;
+        ExerciseModeToggle.IsChecked = enabled;
+        BpmSlider.Value = _engine.BeatsPerMinute;
+        if (enabled)
+        {
+            RecordArmToggle.IsChecked = false;
+        }
+        _isUpdatingUi = false;
+        AudioWorkspace.Visibility = enabled ? Visibility.Collapsed : Visibility.Visible;
+        ExerciseWorkspace.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        RecordArmToggle.IsEnabled = !enabled && RecordingInputCombo.Items.Count > 0;
+        RecordingInputCombo.IsEnabled = !enabled;
+        MetronomeTitle.Text = enabled ? "节拍器 / 练习 BPM" : "节拍器";
+        RecordingHint.Text = enabled
+            ? "预设练习模式暂不录音；切回音轨模式可继续录制。"
+            : "勾选待命后按播放，录音会在暂停或停止时自动作为新音轨加入。";
+        UpdateExerciseSpeedControls();
+        UpdateUi();
+        ScheduleSessionSave();
+        SetStatus(enabled
+            ? "预设练习：点击音符定位，Shift + 拖动选循环；BPM 与倍率联动，不改变音高。"
+            : "已返回音轨模式，恢复原来的播放位置、BPM 和循环区间。");
+    }
+
+    private void ExercisePresetCombo_SelectionChanged(object sender, SelectionChangedEventArgs eventArgs)
+    {
+        if (_isUpdatingUi || ExercisePresetCombo.SelectedItem is not PracticeExercise exercise)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_isExerciseMode && _engine is not null)
+            {
+                _engine.SetExercise(exercise);
+                _engine.SetLoopEnabled(true);
+            }
+            _exerciseLoopStartBeats = 0;
+            _exerciseLoopEndBeats = 0;
+            _exerciseLoopEnabled = true;
+            RefreshExerciseDisplay();
+            UpdateUi();
+            ScheduleSessionSave();
+        }
+        catch (Exception exception)
+        {
+            ShowError("无法载入预设练习", exception);
+        }
+    }
+
+    private void RefreshExerciseDisplay()
+    {
+        Tablature.Exercise = SelectedExercise;
+        ExerciseDescription.Text = SelectedExercise.Description;
+    }
+
+    private void ExerciseSpeedSlider_ValueChanged(
+        object sender, RoutedPropertyChangedEventArgs<double> eventArgs)
+    {
+        if (_isUpdatingUi || !_isExerciseMode)
+        {
+            return;
+        }
+
+        BpmSlider.Value = Math.Clamp(
+            Math.Round(eventArgs.NewValue * PracticeExercise.ReferenceBeatsPerMinute), 40, 240);
+        UpdateExerciseSpeedControls();
+    }
+
+    private void UpdateExerciseSpeedControls()
+    {
+        var wasUpdatingUi = _isUpdatingUi;
+        _isUpdatingUi = true;
+        var speed = _exerciseBpm / PracticeExercise.ReferenceBeatsPerMinute;
+        ExerciseSpeedSlider.Value = speed;
+        ExerciseSpeedLabel.Text = $"{speed:0.00}×";
+        _isUpdatingUi = wasUpdatingUi;
+    }
+
+    private void ExerciseSoundToggle_Changed(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_isUpdatingUi || _engine is null)
+        {
+            return;
+        }
+
+        _engine.ExerciseSoundEnabled = ExerciseSoundToggle.IsChecked == true;
+        ScheduleSessionSave();
+    }
+
+    private void ExerciseFollowToggle_Changed(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_isUpdatingUi || _engine is null)
+        {
+            return;
+        }
+
+        UpdateUi();
+        ScheduleSessionSave();
+    }
+
+    private void ExerciseVolumeSlider_ValueChanged(
+        object sender, RoutedPropertyChangedEventArgs<double> eventArgs)
+    {
+        if (_isUpdatingUi || _engine is null)
+        {
+            return;
+        }
+
+        _engine.ExerciseVolume = (float)eventArgs.NewValue;
+        ScheduleSessionSave();
+    }
+
+    private void LoopExerciseMeasure_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        if (!_isExerciseMode || _engine is null)
+        {
+            return;
+        }
+
+        var exercise = SelectedExercise;
+        var frame = (long)Math.Round(_engine.Position.TotalSeconds * PracticeAudioEngine.OutputSampleRate);
+        var step = Math.Min(exercise.StepCount - 1,
+            exercise.GetStepAtFrame(frame, PracticeAudioEngine.OutputSampleRate, _exerciseBpm));
+        var start = step / ExerciseMeasure.StepsPerMeasure * ExerciseMeasure.StepsPerMeasure;
+        Timeline_LoopSelectionRequested(
+            exercise.GetStepTime(start, _exerciseBpm).TotalSeconds,
+            exercise.GetStepTime(start + ExerciseMeasure.StepsPerMeasure, _exerciseBpm).TotalSeconds);
+        SetStatus("已循环当前小节。");
+    }
+
+    private void CaptureExerciseLoop()
+    {
+        if (_engine is null)
+        {
+            return;
+        }
+
+        _exerciseLoopEnabled = _engine.IsLoopEnabled;
+        _exerciseLoopStartBeats = _engine.LoopStart.TotalSeconds * _exerciseBpm / 60;
+        _exerciseLoopEndBeats = _engine.LoopEnd.TotalSeconds * _exerciseBpm / 60;
+    }
+
+    private void SeekIntoExerciseLoop()
+    {
+        if (_isExerciseMode && _engine is { IsLoopEnabled: true } &&
+            (_engine.Position < _engine.LoopStart || _engine.Position >= _engine.LoopEnd))
+        {
+            _engine.Seek(_engine.LoopStart);
+        }
     }
 
     private void MetronomeVolumeSlider_ValueChanged(
@@ -368,7 +632,10 @@ public partial class MainWindow : Window
                 eventArgs.Handled = true;
                 break;
             case Key.R:
-                RecordArmToggle.IsChecked = RecordArmToggle.IsChecked != true;
+                if (!_isExerciseMode)
+                {
+                    RecordArmToggle.IsChecked = RecordArmToggle.IsChecked != true;
+                }
                 eventArgs.Handled = true;
                 break;
         }
@@ -410,6 +677,7 @@ public partial class MainWindow : Window
             TimeSpan.FromSeconds(startSeconds),
             TimeSpan.FromSeconds(endSeconds));
         _engine.SetLoopEnabled(true);
+        SeekIntoExerciseLoop();
 
         _isUpdatingUi = true;
         LoopToggle.IsChecked = true;
@@ -417,7 +685,7 @@ public partial class MainWindow : Window
 
         UpdateUi();
         ScheduleSessionSave();
-        SetStatus("已从时间轴选择循环区间。");
+        SetStatus("已选择循环区间。");
     }
 
     private void Engine_PlaybackEnded(object? sender, EventArgs eventArgs)
@@ -486,6 +754,10 @@ public partial class MainWindow : Window
         if (_engine is null)
         {
             return;
+        }
+        if (_isExerciseMode)
+        {
+            SetExerciseMode(false);
         }
 
         var errors = new List<string>();
@@ -571,6 +843,8 @@ public partial class MainWindow : Window
         track.PropertyChanged += Track_PropertyChanged;
         RefreshTrackDisplay();
 
+        _pendingTrackLoads++;
+        ExerciseModeToggle.IsEnabled = false;
         try
         {
             var peaks = await WaveformExtractor.ExtractAsync(
@@ -586,6 +860,11 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             SetStatus($"“{track.Name}”可播放，但波形生成失败：{exception.Message}");
+        }
+        finally
+        {
+            _pendingTrackLoads--;
+            ExerciseModeToggle.IsEnabled = _sessionReady && _pendingTrackLoads == 0;
         }
 
         return track;
@@ -765,6 +1044,38 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
+
+        if (session.Exercise is { } savedExercise)
+        {
+            RestoreExerciseState(savedExercise);
+        }
+    }
+
+    internal void RestoreExerciseState(ExerciseSessionState savedExercise)
+    {
+        var preset = ExerciseLibrary.All.FirstOrDefault(exercise => exercise.Id == savedExercise.PresetId);
+        if (preset is null)
+        {
+            MessageBox.Show(this, $"预设“{savedExercise.PresetId}”已不存在，将使用默认练习。",
+                "预设未恢复", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        _isUpdatingUi = true;
+        ExercisePresetCombo.SelectedItem = preset ?? ExerciseLibrary.All[0];
+        ExerciseSoundToggle.IsChecked = savedExercise.SoundEnabled;
+        ExerciseVolumeSlider.Value = Math.Clamp(savedExercise.Volume, 0, 1);
+        ExerciseFollowToggle.IsChecked = savedExercise.FollowPlayback;
+        _isUpdatingUi = false;
+        _exerciseBpm = Math.Clamp(savedExercise.BeatsPerMinute, 40, 240);
+        _exerciseLoopEnabled = savedExercise.LoopEnabled;
+        _exerciseLoopStartBeats = savedExercise.LoopStartBeats;
+        _exerciseLoopEndBeats = savedExercise.LoopEndBeats;
+        RefreshExerciseDisplay();
+        UpdateExerciseSpeedControls();
+        ApplyControlsToEngine();
+        if (savedExercise.IsActive)
+        {
+            SetExerciseMode(true);
+        }
     }
 
     private void ApplyControlsToEngine()
@@ -778,6 +1089,8 @@ public partial class MainWindow : Window
         _engine.MetronomeEnabled = MetronomeToggle.IsChecked == true;
         _engine.MetronomeVolume = (float)MetronomeVolumeSlider.Value;
         _engine.MasterVolume = (float)MasterVolumeSlider.Value;
+        _engine.ExerciseSoundEnabled = ExerciseSoundToggle.IsChecked == true;
+        _engine.ExerciseVolume = (float)ExerciseVolumeSlider.Value;
     }
 
     private void SetLoopStartAtCurrentPosition()
@@ -836,6 +1149,27 @@ public partial class MainWindow : Window
         Timeline.LoopStartSeconds = _engine.LoopStart.TotalSeconds;
         Timeline.LoopEndSeconds = _engine.LoopEnd.TotalSeconds;
         Timeline.InvalidateVisual();
+
+        if (_isExerciseMode)
+        {
+            Tablature.FollowPlayback = ExerciseFollowToggle.IsChecked == true;
+            Tablature.UpdatePlayback(position, _exerciseBpm,
+                _engine.IsLoopEnabled, _engine.LoopStart, _engine.LoopEnd);
+            var step = SelectedExercise.GetStepAtFrame(
+                (long)Math.Round(position.TotalSeconds * PracticeAudioEngine.OutputSampleRate),
+                PracticeAudioEngine.OutputSampleRate, _exerciseBpm);
+            if (step < SelectedExercise.StepCount)
+            {
+                var note = SelectedExercise.GetNote(step);
+                var location = note is null ? "休止" : $"{note.PitchName} · {note.StringNumber} 弦 {note.Fret} 品";
+                ExercisePositionLabel.Text =
+                    $"{step / ExerciseMeasure.StepsPerMeasure + 1}/{SelectedExercise.Measures.Count} 小节 · {location}";
+            }
+            else
+            {
+                ExercisePositionLabel.Text = "练习结束 · 点击音符重新定位";
+            }
+        }
     }
 
     private void RefreshTrackDisplay()
@@ -863,8 +1197,13 @@ public partial class MainWindow : Window
         _saveTimer.Start();
     }
 
-    private PracticeSession CreateSessionSnapshot()
+    internal PracticeSession CreateSessionSnapshot()
     {
+        if (_isExerciseMode)
+        {
+            CaptureExerciseLoop();
+        }
+
         return new PracticeSession
         {
             Tracks = _tracks.Select(track => new TrackSessionEntry
@@ -876,14 +1215,26 @@ public partial class MainWindow : Window
                 Volume = track.Volume,
                 IsMuted = track.IsMuted
             }).ToList(),
-            BeatsPerMinute = BpmSlider.Value,
+            BeatsPerMinute = _audioWorkspaceState?.BeatsPerMinute ?? BpmSlider.Value,
             MetronomeEnabled = MetronomeToggle.IsChecked == true,
             MetronomeVolume = MetronomeVolumeSlider.Value,
             MasterVolume = MasterVolumeSlider.Value,
-            LoopEnabled = _engine?.IsLoopEnabled == true,
-            LoopStartSeconds = _engine?.LoopStart.TotalSeconds ?? 0,
-            LoopEndSeconds = _engine?.LoopEnd.TotalSeconds ?? 0,
-            RecordingInputId = (RecordingInputCombo.SelectedItem as RecordingInput)?.Id
+            LoopEnabled = _audioWorkspaceState?.LoopEnabled ?? (_engine?.IsLoopEnabled == true),
+            LoopStartSeconds = (_audioWorkspaceState?.LoopStart ?? _engine?.LoopStart)?.TotalSeconds ?? 0,
+            LoopEndSeconds = (_audioWorkspaceState?.LoopEnd ?? _engine?.LoopEnd)?.TotalSeconds ?? 0,
+            RecordingInputId = (RecordingInputCombo.SelectedItem as RecordingInput)?.Id,
+            Exercise = new ExerciseSessionState
+            {
+                IsActive = _isExerciseMode,
+                PresetId = SelectedExercise.Id,
+                BeatsPerMinute = _exerciseBpm,
+                SoundEnabled = ExerciseSoundToggle.IsChecked == true,
+                Volume = ExerciseVolumeSlider.Value,
+                FollowPlayback = ExerciseFollowToggle.IsChecked == true,
+                LoopEnabled = _exerciseLoopEnabled,
+                LoopStartBeats = _exerciseLoopStartBeats,
+                LoopEndBeats = _exerciseLoopEndBeats
+            }
         };
     }
 
