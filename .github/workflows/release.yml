@@ -1,0 +1,110 @@
+name: Build Windows release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: 'true'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Resolve version
+        id: version
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+              if ($env:GITHUB_REF_NAME -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+                  throw 'Use a version tag such as v1.2.3 or v1.2.3-beta.1.'
+              }
+              $version = $env:GITHUB_REF_NAME.Substring(1)
+          } else {
+              $version = "0.0.0-ci.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Run tests
+        run: dotnet test .\GuitarPractice.sln --configuration Release --verbosity minimal
+
+      - name: Publish self-contained Windows executable
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: .\scripts\publish-win-x64.ps1 -Version $env:APP_VERSION
+
+      - name: Package executable and licenses
+        id: package
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $archive = "artifacts\GuitarPractice-$env:APP_VERSION-win-x64.zip"
+          Compress-Archive -Path .\artifacts\win-x64\* -DestinationPath $archive -Force
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GuitarPractice-${{ steps.version.outputs.version }}-win-x64
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $headers = @{
+              Authorization = "Bearer $env:GH_TOKEN"
+              Accept = 'application/vnd.github+json'
+          }
+          $release = Invoke-WebRequest `
+              -Uri "$env:GITHUB_API_URL/repos/$env:GH_REPO/releases/tags/$tag" `
+              -Headers $headers `
+              -SkipHttpErrorCheck
+
+          if ($release.StatusCode -eq 200) {
+              gh release upload $tag $env:RELEASE_ARCHIVE --clobber
+          } elseif ($release.StatusCode -eq 404) {
+              $arguments = @(
+                  'release', 'create', $tag, $env:RELEASE_ARCHIVE,
+                  '--verify-tag', '--title', "Guitar Practice $tag", '--generate-notes'
+              )
+              if ($env:APP_VERSION.Contains('-')) {
+                  $arguments += '--prerelease'
+              }
+              gh @arguments
+          } else {
+              throw "Release lookup failed (HTTP $($release.StatusCode)): $($release.Content)"
+          }
+          if ($LASTEXITCODE -ne 0) {
+              throw "GitHub release publishing failed with exit code $LASTEXITCODE."
+          }

@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{5145C02F-2276-4C70-ACDD-7320E275F276}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuitarPractice.App", "src\GuitarPractice.App\GuitarPractice.App.csproj", "{FC5E620B-74DD-4F7F-B843-554AE77CDDB6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuitarPractice.Core", "src\GuitarPractice.Core\GuitarPractice.Core.csproj", "{F8A3B86A-C640-4000-B87A-C3752D66254E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A4129F40-B883-4D4B-918E-762BAB6D45B9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuitarPractice.Core.Tests", "tests\GuitarPractice.Core.Tests\GuitarPractice.Core.Tests.csproj", "{3D2EC70F-6CFE-4F4E-9925-75CB321CDE1A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuitarPractice.App.Tests", "tests\GuitarPractice.App.Tests\GuitarPractice.App.Tests.csproj", "{B3EFC62E-A67B-4B40-9A9D-7DFFB40D9B59}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FC5E620B-74DD-4F7F-B843-554AE77CDDB6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC5E620B-74DD-4F7F-B843-554AE77CDDB6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC5E620B-74DD-4F7F-B843-554AE77CDDB6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC5E620B-74DD-4F7F-B843-554AE77CDDB6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F8A3B86A-C640-4000-B87A-C3752D66254E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8A3B86A-C640-4000-B87A-C3752D66254E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8A3B86A-C640-4000-B87A-C3752D66254E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8A3B86A-C640-4000-B87A-C3752D66254E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3D2EC70F-6CFE-4F4E-9925-75CB321CDE1A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D2EC70F-6CFE-4F4E-9925-75CB321CDE1A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D2EC70F-6CFE-4F4E-9925-75CB321CDE1A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D2EC70F-6CFE-4F4E-9925-75CB321CDE1A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B3EFC62E-A67B-4B40-9A9D-7DFFB40D9B59}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B3EFC62E-A67B-4B40-9A9D-7DFFB40D9B59}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B3EFC62E-A67B-4B40-9A9D-7DFFB40D9B59}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B3EFC62E-A67B-4B40-9A9D-7DFFB40D9B59}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FC5E620B-74DD-4F7F-B843-554AE77CDDB6} = {5145C02F-2276-4C70-ACDD-7320E275F276}
+		{F8A3B86A-C640-4000-B87A-C3752D66254E} = {5145C02F-2276-4C70-ACDD-7320E275F276}
+		{3D2EC70F-6CFE-4F4E-9925-75CB321CDE1A} = {A4129F40-B883-4D4B-918E-762BAB6D45B9}
+		{B3EFC62E-A67B-4B40-9A9D-7DFFB40D9B59} = {A4129F40-B883-4D4B-918E-762BAB6D45B9}
+	EndGlobalSection
+EndGlobal
